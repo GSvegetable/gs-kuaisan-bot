@@ -9,7 +9,12 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from config import BOT_TOKEN, TARGET_CHAT_ID
 
 # ================= 基础配置 =================
-API_URL = "https://macaumarksix.com/api/live11"
+# 🟢 修正为正确的快三接口地址
+API_URL = "https://macaumarksix.com/api/macaujc11.com"
+# 🟢 添加伪装浏览器的请求头，防止被网站拦截
+API_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36"
+}
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 app = Flask(__name__)
@@ -26,7 +31,7 @@ async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
         if not context.bot_data.get('is_broadcast_enabled', True):
             return
 
-        resp = requests.get(API_URL, timeout=10)
+        resp = requests.get(API_URL, headers=API_HEADERS, timeout=10)
         if resp.status_code != 200:
             return
         data = resp.json()
@@ -75,7 +80,8 @@ async def guanbi(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ 正在尝试获取最新一期数据...")
     try:
-        resp = requests.get(API_URL, timeout=15)
+        # 🟢 带上伪装浏览器的请求头再去抓取
+        resp = requests.get(API_URL, headers=API_HEADERS, timeout=15)
         if resp.status_code == 200:
             try:
                 data = resp.json()
@@ -95,15 +101,13 @@ async def ce(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text(f"✅ 抓取成功！当前最新一期数据：\n\n{msg}")
                     return
                 else:
-                    await update.message.reply_text(f"❌ 接口返回了 HTTP 200，但数据内容为空。可能 API 格式变了。")
+                    await update.message.reply_text(f"❌ 接口返回 200，但数据内容为空。")
             except Exception as json_err:
-                await update.message.reply_text(f"❌ 接口返回了 HTTP 200，但解析数据失败：\n{str(json_err)}\n（接口返回的可能不是 JSON 格式）")
+                await update.message.reply_text(f"❌ 接口返回 200，但解析数据失败：\n{str(json_err)}")
         else:
-            # 👇 这里改成了能把具体 HTTP 状态码发出来
-            await update.message.reply_text(f"❌ 抓取失败，HTTP 状态码为：{resp.status_code}\n（建议去 Railway 的 Console 查看详细日志）")
+            await update.message.reply_text(f"❌ 抓取失败，HTTP 状态码为：{resp.status_code}")
             
     except requests.exceptions.RequestException as e:
-        # 👇 捕获网络层面的异常（如连接超时、DNS 解析失败等）
         await update.message.reply_text(f"❌ 请求发生网络错误：\n{str(e)}")
 
 def main():
@@ -115,10 +119,10 @@ def main():
     application.add_handler(CommandHandler("guanbi", guanbi))
     application.add_handler(CommandHandler("ce", ce))
 
-    # 快三通常是 3 分钟开一次奖
+    # 快三 3 分钟开一次
     application.job_queue.run_repeating(scheduled_job, interval=180, first=10)
 
-    logging.info("✅ 快三开奖机器人（带调试版）已上线！")
+    logging.info("✅ 快三开奖机器人（改好接口版）已上线！")
     application.run_polling()
 
 if __name__ == "__main__":
