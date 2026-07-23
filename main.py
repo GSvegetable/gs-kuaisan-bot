@@ -3,8 +3,8 @@ import threading
 import logging
 import requests
 from flask import Flask
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, ext
+from telegram.ext import Application, CommandHandler, ContextTypes, JobQueue
 
 from config import BOT_TOKEN, TARGET_CHAT_ID
 
@@ -23,11 +23,9 @@ def run_flask():
 # ================= 核心逻辑：检测开奖并播报 =================
 async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
     try:
-        # 1. 检查开关状态
         if not context.bot_data.get('is_broadcast_enabled', True):
             return
 
-        # 2. 抓取 API 数据
         resp = requests.get(API_URL, timeout=10)
         if resp.status_code != 200:
             return
@@ -40,7 +38,6 @@ async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
         if not current_expect:
             return
 
-        # 3. 判断是否有新的一期
         last_expect = context.bot_data.get('last_expect', "")
         if last_expect == current_expect:
             return
@@ -48,7 +45,6 @@ async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
             context.bot_data['last_expect'] = current_expect
             return
 
-        # 4. 提取字段（接口数据的 key 是你截图里的那些）
         open_code = latest.get("openCode", "")
         big_small = latest.get("bigSmall", "")
         odd_even = latest.get("oddEven", "")
@@ -61,11 +57,9 @@ async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
             f"📌 形态：{left3 if left3 else '无'}"
         )
 
-        # 5. 发送消息（如果配置了群聊/私聊ID）
         if TARGET_CHAT_ID:
             await context.bot.send_message(chat_id=TARGET_CHAT_ID, text=msg)
         
-        # 更新已播报的期号
         context.bot_data['last_expect'] = current_expect
 
     except Exception as e:
@@ -74,7 +68,7 @@ async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
 # ================= 机器人指令 =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.application.bot_data['is_broadcast_enabled'] = True
-    await update.message.reply_text("🤖 快三开奖播报已开启！发送 `/ce` 立即测试当前期，发送 `/guanbi` 可关闭播报。")
+    await update.message.reply_text("🤖 快三开奖播报已开启！")
 
 async def guanbi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.application.bot_data['is_broadcast_enabled'] = False
@@ -104,14 +98,16 @@ async def ce(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
-    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # ✨ 核心修复点：显式初始化 JobQueue
+    application = Application.builder().token(BOT_TOKEN).job_queue(JobQueue()).build()
+    
     application.bot_data['is_broadcast_enabled'] = True
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("guanbi", guanbi))
     application.add_handler(CommandHandler("ce", ce))
 
-    # 快三通常是 3 分钟（180秒）开一次
     application.job_queue.run_repeating(scheduled_job, interval=180, first=10)
 
     logging.info("✅ 快三开奖机器人已上线！")
