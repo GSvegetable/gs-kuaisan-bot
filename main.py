@@ -44,7 +44,6 @@ async def check_chat_permission(update: Update, context: ContextTypes.DEFAULT_TY
 # ================= 核心播报 =================
 async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
     try:
-        # 注意：这里直接读 bot_data 里的开关状态
         if not context.bot_data.get('is_broadcast_enabled', True):
             return
         resp = requests.get(API_URL, headers=API_HEADERS, timeout=10)
@@ -61,11 +60,21 @@ async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
             return
 
         open_code = latest.get("openCode", "")
+        # ===== 新增：计算三个数字之和 =====
+        total_sum = sum(int(x) for x in open_code.split(',')) if open_code else 0
+
         big_small = latest.get("bigSmall", "")
         odd_even = latest.get("oddEven", "")
         left3 = latest.get("left3", "")
 
-        msg = f"📟 期号：{current_expect}\n🎲 开奖号码：{open_code}\n📊 大小单双：{big_small}{odd_even}\n📌 形态：{left3 if left3 else '无'}"
+        # ===== 更新播报文本，加入和值 =====
+        msg = (
+            f"📟 期号：{current_expect}\n"
+            f"🎲 开奖号码：{open_code}\n"
+            f"🧮 和值：{total_sum}\n"
+            f"📊 大小单双：{big_small}{odd_even}\n"
+            f"📌 形态：{left3 if left3 else '无'}"
+        )
         if TARGET_CHAT_ID:
             await context.bot.send_message(chat_id=TARGET_CHAT_ID, text=msg)
         context.bot_data['last_expect'] = current_expect
@@ -108,10 +117,18 @@ async def ks_ce(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 latest = data[0]
                 expect = latest.get("expect", "未知")
                 open_code = latest.get("openCode", "")
+                # ===== 新增：手动测试时也计算和值 =====
+                total_sum = sum(int(x) for x in open_code.split(',')) if open_code else 0
                 big_small = latest.get("bigSmall", "")
                 odd_even = latest.get("oddEven", "")
                 left3 = latest.get("left3", "")
-                msg = f"📟 期号：{expect}\n🎲 开奖号码：{open_code}\n📊 大小单双：{big_small}{odd_even}\n📌 形态：{left3 if left3 else '无'}"
+                msg = (
+                    f"📟 期号：{expect}\n"
+                    f"🎲 开奖号码：{open_code}\n"
+                    f"🧮 和值：{total_sum}\n"
+                    f"📊 大小单双：{big_small}{odd_even}\n"
+                    f"📌 形态：{left3 if left3 else '无'}"
+                )
                 await update.message.reply_text(f"✅ 抓取成功！当前最新一期数据：\n\n{msg}")
                 return
         await update.message.reply_text("❌ 抓取失败，请稍后重试。")
@@ -128,7 +145,7 @@ def main():
     application.add_handler(CommandHandler("ks_guanbi", ks_guanbi))
     application.add_handler(CommandHandler("ks_ce", ks_ce))
 
-    logging.info("✅ 快三开奖机器人（修复版）已上线！")
+    logging.info("✅ 快三开奖机器人（加入和值版）已上线！")
     application.run_polling()
 
 if __name__ == "__main__":
