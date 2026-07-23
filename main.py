@@ -22,23 +22,31 @@ def run_flask():
     port = int(os.getenv("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
+# ================= 权限校验 =================
 async def check_chat_permission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     chat = update.effective_chat
     if chat.type == "private":
+        logging.info(f"✅ 私聊权限通过，用户ID: {update.effective_user.id}")
         return True
     if chat.type in ["group", "supergroup"]:
         try:
             member = await context.bot.get_chat_member(chat_id=chat.id, user_id=7857605443)
             if member.status in ['creator', 'administrator']:
+                logging.info(f"✅ 群组 {chat.id} 中已找到管理员身份")
                 return True
             await update.message.reply_text("❌ 群组无权限：确保开发者号在此群组中是管理员。")
-        except Exception:
-            await update.message.reply_text("❌ 权限验证出错。")
+        except Exception as e:
+            logging.error(f"❌ 权限验证出错: {e}")
+            await update.message.reply_text("❌ 权限验证出错，可能开发者不在该群。")
         return False
     return False
 
+# ================= 核心播报 =================
 async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
     try:
+        # 注意：这里直接读 bot_data 里的开关状态
+        if not context.bot_data.get('is_broadcast_enabled', True):
+            return
         resp = requests.get(API_URL, headers=API_HEADERS, timeout=10)
         if resp.status_code != 200: return
         data = resp.json()
@@ -64,9 +72,18 @@ async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"快三播报任务异常: {e}")
 
+# ================= 指令 =================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🤖 快三机器人已连接，可用指令如下：\n"
+        "/ks_start - 开启开奖播报\n"
+        "/ks_guanbi - 关闭开奖播报\n"
+        "/ks_ce - 手动测试当前最新一期"
+    )
+
 async def ks_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_chat_permission(update, context): return
-    # 检查任务是否存在，不存在则创建
+    context.bot_data['is_broadcast_enabled'] = True
     has_job = any(job.name == "kuaisan_job" for job in context.job_queue.jobs())
     if not has_job:
         context.job_queue.run_repeating(scheduled_job, interval=180, first=10, name="kuaisan_job")
@@ -74,11 +91,11 @@ async def ks_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def ks_guanbi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_chat_permission(update, context): return
-    # 彻底删除后台定时任务
+    context.bot_data['is_broadcast_enabled'] = False
     for job in context.job_queue.jobs():
         if job.name == "kuaisan_job":
             job.schedule_removal()
-    await update.message.reply_text("✅ 快三开奖播报已关闭（定时任务已销毁）。")
+    await update.message.reply_text("✅ 快三开奖播报已关闭。")
 
 async def ks_ce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_chat_permission(update, context): return
@@ -104,11 +121,14 @@ async def ks_ce(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
     application = Application.builder().token(BOT_TOKEN).build()
-    # 注意：不再默认开启定时任务，完全靠用户指令触发
+    application.bot_data['is_broadcast_enabled'] = True
+
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ks_start", ks_start))
     application.add_handler(CommandHandler("ks_guanbi", ks_guanbi))
     application.add_handler(CommandHandler("ks_ce", ks_ce))
-    logging.info("✅ 快三开奖机器人（独立指令版）已上线！")
+
+    logging.info("✅ 快三开奖机器人（修复版）已上线！")
     application.run_polling()
 
 if __name__ == "__main__":
